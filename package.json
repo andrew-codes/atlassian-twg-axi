@@ -25,16 +25,21 @@
     "build": "tsc -p tsconfig.json && chmod +x dist/bin/twg-axi.js",
     "pretest": "yarn build",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@toon-format/toon": "^4.1.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.0",
     "conventional-commits-parser": "^7.1.2",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
     "semver": "^7.6.3",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
     "vite": "^8.0.0",
     "vitest": "5.0.1"
   },
