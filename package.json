@@ -1,0 +1,35 @@
+{
+  "name": "twg-axi",
+  "version": "0.1.0",
+  "description": "Drop-in wrapper for Atlassian's twg CLI that emits TOON instead of JSON on stdout",
+  "type": "module",
+  "license": "MIT",
+  "author": "Andrew Smith <andrew@andrew.codes>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrew-codes/atlassian-twg-axi.git"
+  },
+  "bin": {
+    "twg-axi": "./dist/bin/twg-axi.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/bin/twg-axi.js",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@toon-format/toon": "^4.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.2"
+  }
+}
