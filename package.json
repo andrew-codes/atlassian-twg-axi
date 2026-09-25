@@ -1,5 +1,5 @@
 {
-  "name": "twg-axi",
+  "name": "@andrew-codes/twg-axi",
   "version": "0.1.0",
   "description": "Drop-in wrapper for Atlassian's twg CLI that emits TOON instead of JSON on stdout",
   "type": "module",
@@ -9,18 +9,21 @@
     "type": "git",
     "url": "git+https://github.com/andrew-codes/atlassian-twg-axi.git"
   },
-  "bin": {
-    "twg-axi": "./dist/bin/twg-axi.js"
-  },
+  "bin": "./dist/bin/twg-axi.js",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "docs"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/bin/twg-axi.js",
-    "pretest": "npm run build",
+    "pretest": "yarn build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -29,7 +32,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^5.0.2"
-  }
+    "conventional-commits-parser": "^7.1.2",
+    "semver": "^7.6.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0",
+    "vitest": "5.0.1"
+  },
+  "packageManager": "yarn@4.18.1"
 }

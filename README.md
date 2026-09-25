@@ -21,7 +21,7 @@ around the installed `twg` binary plus a JSON-to-TOON conversion step at the out
 ## Installation
 
 ```sh
-npm install -g twg-axi
+npm install -g @andrew-codes/twg-axi
 ```
 
 This installs a `twg-axi` executable alongside `twg`. It does not install or configure `twg`
@@ -74,15 +74,8 @@ raw JSON), error messages, and exit codes are all identical to running `twg` dir
 Exit codes and signals (`SIGINT`, `SIGTERM`, `SIGHUP`) are forwarded to the underlying `twg`
 process in both cases.
 
-## Development
+## Contributing
 
-```sh
-npm install
-npm run build     # compile TypeScript to dist/
-npm test          # build, then run the test suite
-npm run typecheck
-```
-
-Tests spawn the compiled CLI against a fixture binary (`src/__tests__/fixtures/fake-twg.mjs`) so
-the suite doesn't depend on `twg` being installed or authenticated. It covers command/flag
-pass-through, JSON-to-TOON conversion correctness (json and jsonl), and non-JSON passthrough.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for local development setup (Yarn PnP /
+zero-installs) and [`docs/release-process.md`](docs/release-process.md) for how releases are
+cut and published.
