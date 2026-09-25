@@ -73,7 +73,20 @@ jobs:
         run: |
           git add package.json
           git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
-          git push origin HEAD:main
+
+      - name: Push version bump
+        run: |
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying..."
+            sleep $((attempt * 5))
+          done
+          echo "Failed to push version bump commit after npm publish succeeded." >&2
+          exit 1
 
       - name: Tag release
         run: |
@@ -83,8 +96,9 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ steps.version.outputs.notes }}
         run: |
-          printf '%s\n' "${{ steps.version.outputs.notes }}" > /tmp/release-notes.md
+          printf '%s\n' "$RELEASE_NOTES" > /tmp/release-notes.md
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
             --notes-file /tmp/release-notes.md
