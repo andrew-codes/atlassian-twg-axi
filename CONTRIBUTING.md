@@ -25,6 +25,7 @@ yarn dlx @yarnpkg/sdks vscode   # or: base, vim, ...
 yarn build       # compile TypeScript to dist/
 yarn test        # build, then run the test suite
 yarn typecheck
+yarn lint        # eslint
 ```
 
 Tests spawn the compiled CLI against a fixture binary (`src/__tests__/fixtures/fake-twg.mjs`)
