@@ -14,10 +14,42 @@ Every push to `main` (i.e. every merged PR) runs `.github/workflows/release.yml`
 3. Walk the commits since the last version tag and compute the next semantic version from
    their messages (see below).
 4. Bump `package.json` to that version, build, and publish the package to npm under the
-   `@andrew-codes` scope.
-5. Only if publishing succeeds: commit the version bump back to `main` (with a `[skip ci]`
-   marker so it doesn't retrigger the workflow) and create + push a git tag for the new
-   version, then create a GitHub release for that tag.
+   `@andrew-codes` scope (`scripts/release/publish.mjs`).
+5. Only once the version is **live** on npm: commit the version bump back to `main` (with a
+   `[skip ci]` marker so it doesn't retrigger the workflow) and create + push a git tag for
+   the new version, then create a GitHub release for that tag.
+
+## Staged publishes
+
+npm can hold a trusted-publisher upload as a *staged* version
+([staged publishing](https://docs.npmjs.com/staged-publishing/)): the registry accepts the
+upload, `yarn npm publish` reports "Package archive published", but the version is hidden
+from `npm view` and installs until a maintainer approves it with 2FA. Nothing is live yet, so
+the release must not commit the bump, tag, or create a release for it.
+
+`publish.mjs` therefore only exits 0 once the version is live. If it is not, the job stops at
+the "Publish to npm" step with an "Awaiting npm approval" error and a summary telling you what
+to do. The same happens when a later run tries to publish a version an earlier run already
+staged (the registry answers `409 Cannot publish over previously staged version`, which yarn
+reports as `YN0035`).
+
+To finish a staged release:
+
+1. Approve the staged version: on npmjs.com open the package -> **Staged Packages** -> **Approve**,
+   or run `npm stage list @andrew-codes/twg-axi` and `npm stage approve <stage-id>` (npm >= 11.15).
+   Approval needs 2FA.
+2. Re-run the failed "Release" job. It finds the version live, skips the publish, and completes
+   the bump commit, push, tag and GitHub release, all on the commit the run was started from.
+   A re-run uses the workflow file from that commit, so it only benefits from release fixes
+   that had already merged when the run started.
+   Pushing another commit to `main` also works, but then the tag lands on that newer commit
+   rather than the one the staged tarball was built from.
+
+To throw a staged version away instead, run `npm stage reject <stage-id>` (2FA) and re-run the
+job; it stages the version again.
+
+Approve or reject a staged version before merging more to `main`: each push to `main` computes
+the version from the last tag and `package.json`, which do not move until the version is live.
 
 ## Idempotence and recovery
 
@@ -26,8 +58,8 @@ to be safely re-runnable after it:
 
 - The next version is computed from the highest of `package.json` and the latest `v*` tag,
   so a missing bump commit cannot cause an already-used version to be reused.
-- `compute-release.mjs` checks the registry (`npm view`). If the computed version is already
-  published, the job skips `yarn npm publish` and only finishes the commit, push, tag and
+- `publish.mjs` checks the registry (`npm view`) before and after publishing. If the version
+  is already live it skips `yarn npm publish` and only finishes the commit, push, tag and
   GitHub release. Steps that already happened (bump commit, tag, release) are skipped too.
 - The bump commit stages only `package.json` and then runs `git reset --hard HEAD`, so any
   other tracked file the install or build touched is discarded instead of blocking the
@@ -40,9 +72,8 @@ to be safely re-runnable after it:
 ### If a release published but did not finish
 
 Re-run the failed "Release" job (or push any commit to `main`). It recomputes the same
-version, sees it on npm, skips the publish, and completes the commit, tag and release. If
-the version is not visible on npm yet (for example a staged publish awaiting approval on
-npmjs.com), approve it first, otherwise the re-run would try to publish it again.
+version, sees it live on npm, skips the publish, and completes the commit, tag and release.
+If the version is staged rather than live, see [Staged publishes](#staged-publishes).
 
 ## npm authentication (trusted publishing)
 

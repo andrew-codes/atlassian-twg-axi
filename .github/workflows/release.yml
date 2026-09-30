@@ -62,13 +62,10 @@ jobs:
       - name: Build
         run: yarn build
 
+      # Exits 0 only once the version is live on npm. A version npm holds as a staged
+      # publish (awaiting approval) stops the job here, so nothing below runs for it.
       - name: Publish to npm
-        if: steps.version.outputs.published != 'true'
-        run: yarn npm publish --access public --provenance
-
-      - name: Already published
-        if: steps.version.outputs.published == 'true'
-        run: echo "v${{ steps.version.outputs.version }} is already on npm; skipping publish and completing commit, tag and release."
+        run: yarn node scripts/release/publish.mjs
 
       - name: Configure git identity
         run: |
@@ -98,7 +95,7 @@ jobs:
             echo "Push attempt $attempt failed, retrying..."
             sleep $((attempt * 5))
           done
-          echo "Failed to push version bump commit (npm publish already ran). Re-run this job: it will skip the publish and finish the push." >&2
+          echo "Failed to push version bump commit (the version is already live on npm). Re-run this job: it will skip the publish and finish the push." >&2
           exit 1
 
       - name: Tag release

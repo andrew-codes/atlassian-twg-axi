@@ -125,20 +125,6 @@ function baseVersion(pkg, previousTag) {
   return known.sort(semver.rcompare)[0];
 }
 
-// `npm view` exits non-zero (E404) when the version does not exist on the registry.
-function isPublished(name, version) {
-  try {
-    execFileSync(
-      "npm",
-      ["view", `${name}@${version}`, "version", "--registry", "https://registry.npmjs.org"],
-      { stdio: ["ignore", "pipe", "ignore"] },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function writeGithubOutput(entries) {
   const outputFile = process.env.GITHUB_OUTPUT;
   const lines = [];
@@ -164,15 +150,11 @@ const parsedCommits = parseCommits(commits);
 const bump = bumpTypeFor(parsedCommits);
 const pkg = readPackage();
 const nextVersion = semver.inc(baseVersion(pkg, previousTag), bump);
-// When a prior run published this version but never finished (no tag, no commit), the
-// workflow skips the publish and only completes the remaining steps.
-const published = isPublished(pkg.name, nextVersion);
 const notes = releaseNotes(parsedCommits, { version: nextVersion, previousTag });
 
 await writeGithubOutput({
   version: nextVersion,
   bump,
-  published: String(published),
   "previous-tag": previousTag ?? "",
   notes,
 });
