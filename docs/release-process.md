@@ -30,6 +30,8 @@ to be safely re-runnable after it:
 
 - `publish.mjs` skips `yarn npm publish` when the version is already live, and only exits 0
   once npm serves the version, so the tag and release steps never run for an unpublished one.
+- npm validates an accepted upload asynchronously and makes the version live on its own, so
+  `publish.mjs` waits for it (see [Waiting for npm to serve the version](#waiting-for-npm-to-serve-the-version)).
 - A rerun of a run that published but did not finish would normally compute the *next*
   version. It doesn't: yarn records the commit a version was published from as `gitHead`, and
   `compute-release.mjs` reuses the highest npm version when its `gitHead` is the commit being
@@ -42,11 +44,33 @@ to be safely re-runnable after it:
   `lightningcss` bindings for CI are committed alongside the local ones. After a dependency
   change, run `yarn install` and commit everything under `.yarn/cache`.
 
+### Waiting for npm to serve the version
+
+`yarn npm publish` returning success means npm accepted the upload, not that the version is
+installable yet. npm validates it first and then makes it live without anyone approving it,
+which can take a few minutes (0.2.1 was still validating when the first release job gave up
+after 30 seconds). After an accepted publish, `publish.mjs` polls the registry with backoff
+(5s, doubling up to 60s between polls) for up to 15 minutes and continues as soon as npm serves
+the version. The waits are logged (`... is not live yet (45s elapsed); checking again in 20s.`).
+
+npm serves package documents with `cache-control: public, max-age=300`, so a plain lookup can
+keep saying "not there" for five minutes after the version is live. Each poll therefore
+fetches the package document from `registry.npmjs.org` with a unique `?cachebust=` query
+string and `cache-control: no-cache`, and counts the version live only when that document
+contains it. Network errors, 404s and 5xx answers count as "not yet".
+
+If the version has not appeared after 15 minutes, the job fails with a message saying npm may
+still be validating. The publish already happened, so once the version shows up on npmjs.com
+just re-run the failed job: it sees the version live, skips the publish and finishes the tag
+and release. The window and delays can be tuned with `RELEASE_LIVE_WAIT_MS`,
+`RELEASE_LIVE_POLL_INITIAL_MS` and `RELEASE_LIVE_POLL_MAX_MS`.
+
 ### A leftover staged version
 
-npm's [staged publishing](https://docs.npmjs.com/staged-publishing/) holds an upload hidden
+Not the usual cause of a slow publish, but it can still exist. npm's
+[staged publishing](https://docs.npmjs.com/staged-publishing/) holds an upload hidden
 until a maintainer approves it with 2FA. Staging is off for this package's trusted publisher,
-so publishes go live in the same run. A version staged while it was on (0.2.0 at the time of
+so publishes are not held for approval. A version staged while it was on (0.2.0 at the time of
 writing) is not visible to `npm view`, but it still blocks that version: publishing it again
 fails with `409 Cannot publish over previously staged version`, which yarn reports as
 `YN0035`. The publish step turns that into an error that says so. To clear it, either:
