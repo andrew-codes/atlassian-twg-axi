@@ -63,7 +63,12 @@ jobs:
         run: yarn build
 
       - name: Publish to npm
+        if: steps.version.outputs.published != 'true'
         run: yarn npm publish --access public --provenance
+
+      - name: Already published
+        if: steps.version.outputs.published == 'true'
+        run: echo "v${{ steps.version.outputs.version }} is already on npm; skipping publish and completing commit, tag and release."
 
       - name: Configure git identity
         run: |
@@ -73,33 +78,48 @@ jobs:
       - name: Commit version bump
         run: |
           git add package.json
-          git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
+          if git diff --cached --quiet; then
+            echo "package.json already at v${{ steps.version.outputs.version }}; nothing to commit."
+          else
+            git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
+          fi
+          # Only package.json is meant to ship. Discard anything else the install or
+          # build touched so the rebase below never trips over a dirty tree.
+          git reset --hard HEAD
 
       - name: Push version bump
         run: |
           for attempt in 1 2 3; do
             git fetch origin main
-            git rebase origin/main
-            if git push origin HEAD:main; then
+            if git rebase origin/main && git push origin HEAD:main; then
               exit 0
             fi
+            git rebase --abort 2>/dev/null || true
             echo "Push attempt $attempt failed, retrying..."
             sleep $((attempt * 5))
           done
-          echo "Failed to push version bump commit after npm publish succeeded." >&2
+          echo "Failed to push version bump commit (npm publish already ran). Re-run this job: it will skip the publish and finish the push." >&2
           exit 1
 
       - name: Tag release
         run: |
-          git tag -a "v${{ steps.version.outputs.version }}" -m "v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+          tag="v${{ steps.version.outputs.version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists on origin; skipping."
+          else
+            git tag -a "$tag" -m "$tag"
+            git push origin "$tag"
+          fi
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: ${{ steps.version.outputs.notes }}
         run: |
-          printf '%s\n' "$RELEASE_NOTES" > /tmp/release-notes.md
-          gh release create "v${{ steps.version.outputs.version }}" \
-            --title "v${{ steps.version.outputs.version }}" \
-            --notes-file /tmp/release-notes.md
+          tag="v${{ steps.version.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub release $tag already exists; skipping."
+          else
+            printf '%s\n' "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+            gh release create "$tag" --title "$tag" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi

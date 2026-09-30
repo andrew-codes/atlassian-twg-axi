@@ -19,6 +19,31 @@ Every push to `main` (i.e. every merged PR) runs `.github/workflows/release.yml`
    marker so it doesn't retrigger the workflow) and create + push a git tag for the new
    version, then create a GitHub release for that tag.
 
+## Idempotence and recovery
+
+The publish step is the only one that cannot be undone, so the rest of the job is written
+to be safely re-runnable after it:
+
+- The next version is computed from the highest of `package.json` and the latest `v*` tag,
+  so a missing bump commit cannot cause an already-used version to be reused.
+- `compute-release.mjs` checks the registry (`npm view`). If the computed version is already
+  published, the job skips `yarn npm publish` and only finishes the commit, push, tag and
+  GitHub release. Steps that already happened (bump commit, tag, release) are skipped too.
+- The bump commit stages only `package.json` and then runs `git reset --hard HEAD`, so any
+  other tracked file the install or build touched is discarded instead of blocking the
+  rebase in the push step. The push retries up to three times.
+- The zero-installs cache must not change during `yarn install`. `.yarnrc.yml` sets
+  `supportedArchitectures` (macOS and Linux, arm64 and x64) so the native `rolldown` and
+  `lightningcss` bindings for CI are committed alongside the local ones. After a dependency
+  change, run `yarn install` and commit everything under `.yarn/cache`.
+
+### If a release published but did not finish
+
+Re-run the failed "Release" job (or push any commit to `main`). It recomputes the same
+version, sees it on npm, skips the publish, and completes the commit, tag and release. If
+the version is not visible on npm yet (for example a staged publish awaiting approval on
+npmjs.com), approve it first, otherwise the re-run would try to publish it again.
+
 ## npm authentication (trusted publishing)
 
 The release publishes with `yarn npm publish --provenance` and no stored npm token. Yarn
