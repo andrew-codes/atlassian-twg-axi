@@ -113,9 +113,30 @@ function releaseNotes(parsedCommits, { version, previousTag }) {
   return `${header}\n\n${body}`;
 }
 
-function currentVersion() {
-  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-  return pkg.version;
+function readPackage() {
+  return JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+}
+
+// package.json can lag behind the tags (and npm) when a previous run published but
+// failed before pushing its version-bump commit, so the highest known version wins.
+function baseVersion(pkg, previousTag) {
+  const known = [pkg.version];
+  if (previousTag) known.push(previousTag.slice(1));
+  return known.sort(semver.rcompare)[0];
+}
+
+// `npm view` exits non-zero (E404) when the version does not exist on the registry.
+function isPublished(name, version) {
+  try {
+    execFileSync(
+      "npm",
+      ["view", `${name}@${version}`, "version", "--registry", "https://registry.npmjs.org"],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function writeGithubOutput(entries) {
@@ -141,12 +162,17 @@ const previousTag = lastVersionTag();
 const commits = commitsSince(previousTag);
 const parsedCommits = parseCommits(commits);
 const bump = bumpTypeFor(parsedCommits);
-const nextVersion = semver.inc(currentVersion(), bump);
+const pkg = readPackage();
+const nextVersion = semver.inc(baseVersion(pkg, previousTag), bump);
+// When a prior run published this version but never finished (no tag, no commit), the
+// workflow skips the publish and only completes the remaining steps.
+const published = isPublished(pkg.name, nextVersion);
 const notes = releaseNotes(parsedCommits, { version: nextVersion, previousTag });
 
 await writeGithubOutput({
   version: nextVersion,
   bump,
+  published: String(published),
   "previous-tag": previousTag ?? "",
   notes,
 });
