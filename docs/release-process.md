@@ -19,6 +19,25 @@ Every push to `main` (i.e. every merged PR) runs `.github/workflows/release.yml`
    marker so it doesn't retrigger the workflow) and create + push a git tag for the new
    version, then create a GitHub release for that tag.
 
+## npm authentication (trusted publishing)
+
+The release publishes with `yarn npm publish --provenance` and no stored npm token. Yarn
+(>= 4.10.3) exchanges the job's GitHub OIDC token (`permissions: id-token: write`) for a
+short-lived npm publish token. This only works if the package is registered as a trusted
+publisher on npmjs.com:
+
+- Package: `@andrew-codes/twg-axi` -> Settings -> Trusted Publisher -> GitHub Actions
+- Organization/user: `andrew-codes`, repository: `atlassian-twg-axi`
+- Workflow filename: `release.yml` (exactly; leave environment empty)
+
+`.yarnrc.yml` sets `npmPublishRegistry` to `https://registry.npmjs.org` so the exchange and
+publish go straight to npm rather than through the `registry.yarnpkg.com` mirror.
+
+Yarn swallows OIDC exchange failures, so a missing or mismatched trusted publisher shows up
+only as `YN0033: No authentication configured for request` during the publish step. If you
+see that, check the trusted publisher settings above first. `NODE_AUTH_TOKEN` and
+`.npmrc` are ignored by Yarn and are not part of this flow.
+
 ## How the version is computed
 
 The workflow uses [Conventional Commits](https://www.conventionalcommits.org/) prefixes on
