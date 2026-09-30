@@ -26,7 +26,7 @@ function runPublish(opts: {
     chmodSync(file, 0o755);
   };
   if (opts.live) writeFileSync(marker, "");
-  bin("npm", `[ -e "${marker}" ]`);
+  bin("npm", `[ -e "${marker}" ] && echo '"0.0.0"'`);
   bin(
     "yarn",
     [
@@ -67,35 +67,23 @@ describe("release publish step", () => {
     expect(result.publishCalls).toContain("npm publish --access public --provenance");
   });
 
-  it("stops with approval instructions when the publish is accepted but staged", () => {
+  it("fails without tagging when the upload is accepted but the version never goes live", () => {
     const result = runPublish({ yarnStatus: 0 });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("::error title=Awaiting npm approval::");
-    expect(result.stderr).toContain("npm stage approve");
+    expect(result.stderr).toContain("::error title=Publish to npm::");
+    expect(result.stderr).toContain("not live");
   });
 
-  it("stops without failing confusingly when the version was staged by an earlier run", () => {
+  it("explains a leftover staged version instead of failing confusingly", () => {
     const result = runPublish({
       yarnStatus: 1,
       yarnOutput: 'YN0035: Cannot publish over previously staged version "0.2.0".',
     });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("earlier run already staged");
-    expect(result.stderr).toContain("npm stage approve");
-  });
-
-  it("continues when an earlier staged version was approved in the meantime", () => {
-    // Live only appears after the first lookup, mimicking approval between the check and the publish.
-    const result = runPublish({
-      yarnStatus: 1,
-      yarnOutput: 'YN0035: Cannot publish over previously staged version "0.2.0".',
-      liveAfterPublish: true,
-    });
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("now live");
+    expect(result.stderr).toContain("still waiting for approval");
+    expect(result.stderr).toContain("npm stage reject");
   });
 
   it("propagates unrelated publish failures", () => {

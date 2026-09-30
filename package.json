@@ -1,6 +1,6 @@
 {
   "name": "@andrew-codes/twg-axi",
-  "version": "0.1.0",
+  "version": "0.0.0-development",
   "description": "Drop-in wrapper for Atlassian's twg CLI that emits TOON instead of JSON on stdout",
   "type": "module",
   "license": "MIT",

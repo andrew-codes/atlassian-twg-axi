@@ -2,15 +2,34 @@ import { execFileSync } from "node:child_process";
 
 export const REGISTRY = "https://registry.npmjs.org";
 
-// `npm view` exits non-zero (E404) when the version is not live on the registry. A version
-// held by npm's staged publishing (awaiting approval) is not live and is not listed here.
-export function isPublished(name, version) {
+function view(spec, field) {
+  return execFileSync("npm", ["view", spec, field, "--json", "--registry", REGISTRY], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+}
+
+// `npm view` exits non-zero (E404) when the package or version does not exist.
+function viewOrNull(spec, field) {
   try {
-    execFileSync("npm", ["view", `${name}@${version}`, "version", "--registry", REGISTRY], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return true;
+    const out = view(spec, field);
+    return out ? JSON.parse(out) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isPublished(name, version) {
+  return viewOrNull(`${name}@${version}`, "version") !== null;
+}
+
+// All versions live on the registry (empty for a package that was never published).
+export function publishedVersions(name) {
+  const versions = viewOrNull(name, "versions");
+  return [versions ?? []].flat();
+}
+
+// The commit a version was published from (yarn records `gitHead` in the manifest).
+export function publishedGitHead(name, version) {
+  return viewOrNull(`${name}@${version}`, "gitHead");
 }
