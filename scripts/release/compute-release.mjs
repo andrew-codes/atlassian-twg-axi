@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { CommitParser } from "conventional-commits-parser";
 import semver from "semver";
+import { publishedGitHead, publishedVersions } from "./npm-registry.mjs";
 
 const HEADER_PATTERN = /^(\w*)(?:\((.*)\))?(!)?: (.*)$/;
 const HEADER_CORRESPONDENCE = ["type", "scope", "breaking", "subject"];
@@ -15,9 +16,10 @@ function git(args, options = {}) {
   return execFileSync("git", args, { encoding: "utf8", ...options }).trim();
 }
 
-function lastVersionTag() {
+function lastVersionTag(exclude) {
+  const excludeArgs = exclude ? [`--exclude=${exclude}`] : [];
   try {
-    return git(["describe", "--tags", "--abbrev=0", "--match=v[0-9]*.[0-9]*.[0-9]*"], {
+    return git(["describe", "--tags", "--abbrev=0", "--match=v[0-9]*.[0-9]*.[0-9]*", ...excludeArgs], {
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
@@ -117,26 +119,20 @@ function readPackage() {
   return JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 }
 
-// package.json can lag behind the tags (and npm) when a previous run published but
-// failed before pushing its version-bump commit, so the highest known version wins.
-function baseVersion(pkg, previousTag) {
-  const known = [pkg.version];
-  if (previousTag) known.push(previousTag.slice(1));
-  return known.sort(semver.rcompare)[0];
+// package.json only holds a placeholder version, so the base is the highest version npm
+// serves or any git tag records. Tags can trail npm (a run published but did not finish
+// tagging) and npm can trail tags (a version that is staged rather than live).
+function allVersionTags() {
+  return git(["tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"])
+    .split("\n")
+    .map((tag) => tag.trim().slice(1))
+    .filter((version) => semver.valid(version));
 }
 
-// `npm view` exits non-zero (E404) when the version does not exist on the registry.
-function isPublished(name, version) {
-  try {
-    execFileSync(
-      "npm",
-      ["view", `${name}@${version}`, "version", "--registry", "https://registry.npmjs.org"],
-      { stdio: ["ignore", "pipe", "ignore"] },
-    );
-    return true;
-  } catch {
-    return false;
-  }
+function baseVersion(pkg, npmVersions) {
+  const known = [...npmVersions, ...allVersionTags()].filter((v) => !semver.prerelease(v));
+  if (known.length === 0) return pkg.version;
+  return known.sort(semver.rcompare)[0];
 }
 
 async function writeGithubOutput(entries) {
@@ -158,21 +154,26 @@ async function writeGithubOutput(entries) {
   }
 }
 
-const previousTag = lastVersionTag();
+const pkg = readPackage();
+const npmVersions = publishedVersions(pkg.name);
+const base = baseVersion(pkg, npmVersions);
+
+// A rerun of a run that already published (but did not finish tagging or the release) sees
+// its own commit as the published version's gitHead. Reuse that version instead of
+// computing a new one, which would publish the same commits a second time.
+const resumed =
+  npmVersions.includes(base) && publishedGitHead(pkg.name, base) === git(["rev-parse", "HEAD"]);
+
+const previousTag = lastVersionTag(resumed ? `v${base}` : undefined);
 const commits = commitsSince(previousTag);
 const parsedCommits = parseCommits(commits);
 const bump = bumpTypeFor(parsedCommits);
-const pkg = readPackage();
-const nextVersion = semver.inc(baseVersion(pkg, previousTag), bump);
-// When a prior run published this version but never finished (no tag, no commit), the
-// workflow skips the publish and only completes the remaining steps.
-const published = isPublished(pkg.name, nextVersion);
+const nextVersion = resumed ? base : semver.inc(base, bump);
 const notes = releaseNotes(parsedCommits, { version: nextVersion, previousTag });
 
 await writeGithubOutput({
   version: nextVersion,
   bump,
-  published: String(published),
   "previous-tag": previousTag ?? "",
   notes,
 });

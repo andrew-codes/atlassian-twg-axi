@@ -56,50 +56,22 @@ jobs:
         id: version
         run: yarn node scripts/release/compute-release.mjs
 
-      - name: Bump package.json version
+      # package.json in the repo holds a placeholder. The real version only exists inside
+      # this job, is used for the publish, and is never committed back to main.
+      - name: Set package.json version for publish
         run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build
         run: yarn build
 
+      # Exits 0 only once the version is live on npm; skips the upload when it already is.
       - name: Publish to npm
-        if: steps.version.outputs.published != 'true'
-        run: yarn npm publish --access public --provenance
-
-      - name: Already published
-        if: steps.version.outputs.published == 'true'
-        run: echo "v${{ steps.version.outputs.version }} is already on npm; skipping publish and completing commit, tag and release."
+        run: yarn node scripts/release/publish.mjs
 
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Commit version bump
-        run: |
-          git add package.json
-          if git diff --cached --quiet; then
-            echo "package.json already at v${{ steps.version.outputs.version }}; nothing to commit."
-          else
-            git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
-          fi
-          # Only package.json is meant to ship. Discard anything else the install or
-          # build touched so the rebase below never trips over a dirty tree.
-          git reset --hard HEAD
-
-      - name: Push version bump
-        run: |
-          for attempt in 1 2 3; do
-            git fetch origin main
-            if git rebase origin/main && git push origin HEAD:main; then
-              exit 0
-            fi
-            git rebase --abort 2>/dev/null || true
-            echo "Push attempt $attempt failed, retrying..."
-            sleep $((attempt * 5))
-          done
-          echo "Failed to push version bump commit (npm publish already ran). Re-run this job: it will skip the publish and finish the push." >&2
-          exit 1
 
       - name: Tag release
         run: |

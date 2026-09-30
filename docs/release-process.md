@@ -11,38 +11,53 @@ Every push to `main` (i.e. every merged PR) runs `.github/workflows/release.yml`
 2. Install with Yarn PnP (`yarn install --immutable`) and run the full verification suite
    (typecheck, tests, lint if present). If any step fails, the workflow stops here - nothing
    is published, versioned, or tagged.
-3. Walk the commits since the last version tag and compute the next semantic version from
-   their messages (see below).
-4. Bump `package.json` to that version, build, and publish the package to npm under the
-   `@andrew-codes` scope.
-5. Only if publishing succeeds: commit the version bump back to `main` (with a `[skip ci]`
-   marker so it doesn't retrigger the workflow) and create + push a git tag for the new
-   version, then create a GitHub release for that tag.
+3. Compute the next semantic version (`scripts/release/compute-release.mjs`). The base is the
+   highest version that npm serves or a `v*` git tag records; the bump comes from the commit
+   messages since the last tag (see below).
+4. Set that version on `package.json` inside the job only, build, and publish to npm under the
+   `@andrew-codes` scope (`scripts/release/publish.mjs`).
+5. Once the version is confirmed live on npm: create and push the `v<version>` git tag and
+   create the GitHub release for it.
+
+The release never commits to `main`. `package.json` in the repo holds a placeholder version
+(`0.0.0-development`); the version that ships exists only in the job's working copy and in the
+published package. The source of truth for "what is the current version" is npm plus the tags.
 
 ## Idempotence and recovery
 
 The publish step is the only one that cannot be undone, so the rest of the job is written
 to be safely re-runnable after it:
 
-- The next version is computed from the highest of `package.json` and the latest `v*` tag,
-  so a missing bump commit cannot cause an already-used version to be reused.
-- `compute-release.mjs` checks the registry (`npm view`). If the computed version is already
-  published, the job skips `yarn npm publish` and only finishes the commit, push, tag and
-  GitHub release. Steps that already happened (bump commit, tag, release) are skipped too.
-- The bump commit stages only `package.json` and then runs `git reset --hard HEAD`, so any
-  other tracked file the install or build touched is discarded instead of blocking the
-  rebase in the push step. The push retries up to three times.
+- `publish.mjs` skips `yarn npm publish` when the version is already live, and only exits 0
+  once npm serves the version, so the tag and release steps never run for an unpublished one.
+- A rerun of a run that published but did not finish would normally compute the *next*
+  version. It doesn't: yarn records the commit a version was published from as `gitHead`, and
+  `compute-release.mjs` reuses the highest npm version when its `gitHead` is the commit being
+  released. The publish is then skipped and only the tag and release are finished.
+- The tag and release steps each check whether their target already exists and skip if so.
+- Re-run the failed job for the *latest* failed run (or push to `main`). Re-running an older
+  run after a newer release has shipped would compute a version from the old commit.
 - The zero-installs cache must not change during `yarn install`. `.yarnrc.yml` sets
   `supportedArchitectures` (macOS and Linux, arm64 and x64) so the native `rolldown` and
   `lightningcss` bindings for CI are committed alongside the local ones. After a dependency
   change, run `yarn install` and commit everything under `.yarn/cache`.
 
-### If a release published but did not finish
+### A leftover staged version
 
-Re-run the failed "Release" job (or push any commit to `main`). It recomputes the same
-version, sees it on npm, skips the publish, and completes the commit, tag and release. If
-the version is not visible on npm yet (for example a staged publish awaiting approval on
-npmjs.com), approve it first, otherwise the re-run would try to publish it again.
+npm's [staged publishing](https://docs.npmjs.com/staged-publishing/) holds an upload hidden
+until a maintainer approves it with 2FA. Staging is off for this package's trusted publisher,
+so publishes go live in the same run. A version staged while it was on (0.2.0 at the time of
+writing) is not visible to `npm view`, but it still blocks that version: publishing it again
+fails with `409 Cannot publish over previously staged version`, which yarn reports as
+`YN0035`. The publish step turns that into an error that says so. To clear it, either:
+
+- **Approve it**: on npmjs.com open the package -> **Staged Packages** -> **Approve**, or run
+  `npm stage list @andrew-codes/twg-axi` and `npm stage approve <stage-id>` (npm >= 11.15,
+  2FA). The next run (or a re-run of the failed job) then sees the version live and finishes
+  the tag and release. The tag lands on the commit that run started from, which can be newer
+  than the one the staged tarball was built from.
+- **Reject it**: `npm stage reject <stage-id>` (2FA). The next run publishes that version
+  fresh.
 
 ## npm authentication (trusted publishing)
 
