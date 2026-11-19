@@ -11,6 +11,11 @@ import { waitUntilLive } from "./wait-until-live.mjs";
 // this polls the registry, with backoff, for up to RELEASE_LIVE_WAIT_MS (15 minutes).
 //
 // If the version is already live (a rerun of a run that published), the publish is skipped.
+// If signing the provenance statement fails with a Rekor 409 ("an equivalent entry already
+// exists in the transparency log"), the publish is retried. Yarn's sigstore client retries a
+// transparency log write whose response it never saw; the first write had succeeded, so the
+// retry gets a 409 and yarn gives up before uploading anything. A new attempt signs with a
+// fresh key, which makes a new log entry, and publishes normally.
 // If npm answers 409 "Cannot publish over previously staged version", an earlier upload of
 // this version is still waiting for approval on npmjs.com and has to be approved or rejected
 // there before this step can succeed.
@@ -29,6 +34,17 @@ const waitOptions = {
     ),
 };
 
+const publishAttempts = envMs("RELEASE_PUBLISH_ATTEMPTS", 3);
+const publishRetryDelayMs = envMs("RELEASE_PUBLISH_RETRY_DELAY_MS", 10_000);
+
+// The only failure that happens before the upload and says nothing about the package, so it
+// is the only one worth retrying. Anything else (auth, staged version, validation) would fail
+// the same way again.
+const isTlogConflict = (output) =>
+  /error creating tlog entry/i.test(output) && /\b409\b|equivalent entry already exists/i.test(output);
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function fail(message) {
   console.error(`::error title=Publish to npm::${message.replaceAll("\n", "%0A")}`);
   console.error(message);
@@ -43,14 +59,16 @@ if (await isLive(name, version)) {
   process.exit(0);
 }
 
-const publish = spawnSync("yarn", ["npm", "publish", "--access", "public", "--provenance"], {
-  encoding: "utf8",
-});
-process.stdout.write(publish.stdout ?? "");
-process.stderr.write(publish.stderr ?? "");
+for (let attempt = 1; ; attempt++) {
+  const publish = spawnSync("yarn", ["npm", "publish", "--access", "public", "--provenance"], {
+    encoding: "utf8",
+  });
+  process.stdout.write(publish.stdout ?? "");
+  process.stderr.write(publish.stderr ?? "");
+  if (publish.status === 0) break;
 
-if (publish.status !== 0) {
-  if (/previously staged/i.test(`${publish.stdout}${publish.stderr}`)) {
+  const output = `${publish.stdout}${publish.stderr}`;
+  if (/previously staged/i.test(output)) {
     fail(
       [
         `${name}@${version} was staged by an earlier upload and is still waiting for approval, so it cannot be published again.`,
@@ -59,7 +77,24 @@ if (publish.status !== 0) {
       ].join("\n"),
     );
   }
-  process.exit(publish.status ?? 1);
+  if (!isTlogConflict(output)) process.exit(publish.status ?? 1);
+
+  if (attempt >= publishAttempts) {
+    fail(
+      [
+        `Signing the provenance for ${name}@${version} failed ${attempt} times with a transparency log conflict (409),`,
+        "so nothing was uploaded to npm. Re-run this job; if it keeps happening, check https://status.sigstore.dev.",
+      ].join("\n"),
+    );
+  }
+  console.log(
+    `Provenance signing hit a transparency log conflict (attempt ${attempt} of ${publishAttempts}); nothing was uploaded. Retrying in ${Math.round(publishRetryDelayMs / 1000)}s.`,
+  );
+  await sleep(publishRetryDelayMs);
+  if (await isLive(name, version)) {
+    console.log(`v${version} became live on npm; not publishing again.`);
+    process.exit(0);
+  }
 }
 
 const { live, waitedMs } = await waitUntilLive(() => isLive(name, version), waitOptions);

@@ -65,6 +65,26 @@ just re-run the failed job: it sees the version live, skips the publish and fini
 and release. The window and delays can be tuned with `RELEASE_LIVE_WAIT_MS`,
 `RELEASE_LIVE_POLL_INITIAL_MS` and `RELEASE_LIVE_POLL_MAX_MS`.
 
+### A transparency log conflict while signing provenance
+
+`--provenance` signs the package and records the signature in the public Rekor transparency
+log before anything is uploaded. Yarn's sigstore client retries that write when it never sees
+the response. When the first write had already succeeded, the retry is refused and yarn stops:
+
+```
+YN0001: error creating tlog entry - (409) an equivalent entry already exists in the transparency log with UUID ...
+```
+
+This is what failed the 0.2.3 release (run 44596325837): the log entry was created by the
+same run, seconds before the error, and the package never reached npm. npm's own CLI uses the
+same sigstore code and the same setting, so switching from yarn to `npm publish` would not
+avoid it. Because nothing was uploaded, publishing again is safe, and a new attempt signs with
+a fresh key, which makes a new log entry. `publish.mjs` therefore retries this one failure up
+to 3 times, 10 seconds apart, checking between attempts that the version did not go live in
+the meantime. If every attempt fails it stops with a message saying nothing was uploaded;
+re-run the job. The limits can be tuned with `RELEASE_PUBLISH_ATTEMPTS` and
+`RELEASE_PUBLISH_RETRY_DELAY_MS`. No other publish failure is retried.
+
 ### A leftover staged version
 
 Not the usual cause of a slow publish, but it can still exist. npm's
