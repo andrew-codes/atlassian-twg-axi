@@ -15,7 +15,7 @@ around the installed `twg` binary plus a JSON-to-TOON conversion step at the out
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 22.12
 - The [`twg` CLI](https://www.npmjs.com/package/twg) installed and authenticated on your `PATH`
 
 ## Installation
